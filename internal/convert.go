@@ -49,11 +49,11 @@ func convertFrontMatter(frontMatter string, keyMap map[string]string, targetForm
 	}
 	var convertedFrontMatter string
 	if targetFormat == "yaml" {
-		bytes, err := yaml.Marshal(convertedMap)
+		bys, err := yaml.Marshal(convertedMap)
 		if err != nil {
 			return "", err
 		}
-		convertedFrontMatter = string(bytes)
+		convertedFrontMatter = string(bys)
 	} else if targetFormat == "toml" {
 		var buffer bytes.Buffer
 		encoder := toml.NewEncoder(&buffer)
@@ -68,12 +68,12 @@ func convertFrontMatter(frontMatter string, keyMap map[string]string, targetForm
 	return fmt.Sprintf("---\n%s---", convertedFrontMatter), nil
 }
 
-func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFormat string) {
+func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFormat string, errors chan<- error) {
 	dstFile := filepath.Join(dstDir, filepath.Base(srcFile))
 
 	content, err := ioutil.ReadFile(srcFile)
 	if err != nil {
-		fmt.Printf("Error reading source file %s: %v\n", srcFile, err)
+		errors <- fmt.Errorf("error reading source file %s: %v", srcFile, err)
 		return
 	}
 
@@ -83,44 +83,48 @@ func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFor
 
 	convertedFrontMatter, err := convertFrontMatter(frontMatter, keyMap, targetFormat)
 	if err != nil {
-		fmt.Printf("Error converting front matter in file %s: %v\n", srcFile, err)
+		errors <- fmt.Errorf("error converting front matter in file %s: %v", srcFile, err)
 		return
 	}
 
 	convertedContent := fmt.Sprintf("%s\n\n%s", convertedFrontMatter, body)
 	err = ioutil.WriteFile(dstFile, []byte(convertedContent), 0644)
 	if err != nil {
-		fmt.Printf("Error writing to destination file %s: %v\n", dstFile, err)
+		errors <- fmt.Errorf("error writing to destination file %s: %v", dstFile, err)
 		return
 	}
 
 	fmt.Printf("Converted %s to %s\n", srcFile, dstFile)
 }
 
-func convertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat string) {
+func convertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat string) error {
 	err := os.MkdirAll(dstDir, 0755)
 	if err != nil {
-		fmt.Printf("Error creating destination directory %s: %v\n", dstDir, err)
-		return
-	}
-	files, err := ioutil.ReadDir(srcDir)
-	if err != nil {
-		fmt.Printf("Error reading source directory %s: %v\n", srcDir, err)
-		return
+		return fmt.Errorf("error creating destination directory %s: %v", dstDir, err)
 	}
 
 	var wg sync.WaitGroup
+	errors := make(chan error)
 
-	for _, f := range files {
-		if strings.HasSuffix(f.Name(), ".md") {
-			srcFile := filepath.Join(srcDir, f.Name())
+	filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
 			wg.Add(1)
-			go func(srcFile string) {
+			go func() {
 				defer wg.Done()
-				convertMarkdown(srcFile, dstDir, keyMap, targetFormat)
-			}(srcFile)
+				convertMarkdown(path, dstDir, keyMap, targetFormat, errors)
+			}()
 		}
+		return nil
+	})
+
+	go func() {
+		wg.Wait()
+		close(errors)
+	}()
+
+	for err := range errors {
+		fmt.Println(err)
 	}
 
-	wg.Wait()
+	return nil
 }
