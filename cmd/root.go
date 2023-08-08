@@ -36,11 +36,12 @@ and converts them to Hugo FrontMatter. The converted files are written to a spec
 		}
 
 		var keyMap map[string]string
-		if direction == "hexo2hugo" {
+		switch direction {
+		case "hexo2hugo":
 			keyMap = internal.HEXO_TO_HUGO_KEY_MAP
-		} else if direction == "hugo2hexo" {
+		case "hugo2hexo":
 			keyMap = internal.HUGO_TO_HEXO_KEY_MAP
-		} else {
+		default:
 			log.Fatalf("Invalid conversion direction: %s", direction)
 		}
 
@@ -59,16 +60,14 @@ func Execute() {
 }
 
 func init() {
-
 	rootCmd.Flags().StringVar(&srcDir, "src", "", "source directory containing Markdown files to convert (required)")
+	rootCmd.Flags().StringVar(&dstDir, "dst", "", "destination directory to write converted Markdown files (required)")
+	rootCmd.Flags().StringVar(&targetFormat, "format", "yaml", "target FrontMatter format (yaml or toml)")
+	rootCmd.Flags().StringVar(&direction, "direction", "hexo2hugo", "conversion direction (hexo2hugo or hugo2hexo)")
+
 	err := rootCmd.MarkFlagRequired("src")
 	cobra.CheckErr(err)
 
-	rootCmd.Flags().StringVar(&dstDir, "dst", "", "destination directory to write converted Markdown files (required)")
 	err = rootCmd.MarkFlagRequired("dst")
 	cobra.CheckErr(err)
-
-	rootCmd.Flags().StringVar(&targetFormat, "format", "yaml", "target FrontMatter format (yaml or toml)")
-
-	rootCmd.Flags().StringVar(&direction, "direction", "hexo2hugo", "conversion direction (hexo2hugo or hugo2hexo)")
 }
