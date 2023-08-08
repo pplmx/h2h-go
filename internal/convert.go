@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -34,11 +35,16 @@ func reverseMap(m map[string]string) map[string]string {
 	return n
 }
 
-func convertFrontMatter(frontMatter string, keyMap map[string]string, targetFormat string) (string, error) {
+// convertFrontMatter converts front matter from one format to another.
+// frontMatter is the front matter string to convert.
+// keyMap is a map of key mappings to apply during conversion.
+// targetFormat is the target format for the converted front matter ("toml" or "yaml").
+// The function returns the converted front matter string and any error that occurred.
+func convertFrontMatter(frontMatter string, keyMap map[string]string, targetFormat string) (convertedFrontMatter string, err error) {
 	var frontMatterMap map[string]interface{}
-	err := yaml.Unmarshal([]byte(frontMatter), &frontMatterMap)
+	err = yaml.Unmarshal([]byte(frontMatter), &frontMatterMap)
 	if err != nil {
-		return "", err
+		return
 	}
 	convertedMap := make(map[string]interface{})
 	for key, value := range frontMatterMap {
@@ -48,14 +54,14 @@ func convertFrontMatter(frontMatter string, keyMap map[string]string, targetForm
 		}
 		convertedMap[convertedKey] = value
 	}
-	var convertedFrontMatter string
-	if targetFormat == "yaml" {
+	switch targetFormat {
+	case "yaml":
 		bys, err := yaml.Marshal(convertedMap)
 		if err != nil {
 			return "", err
 		}
 		convertedFrontMatter = string(bys)
-	} else if targetFormat == "toml" {
+	case "toml":
 		var buffer bytes.Buffer
 		encoder := toml.NewEncoder(&buffer)
 		err := encoder.Encode(convertedMap)
@@ -63,12 +69,19 @@ func convertFrontMatter(frontMatter string, keyMap map[string]string, targetForm
 			return "", err
 		}
 		convertedFrontMatter = buffer.String()
-	} else {
-		return "", fmt.Errorf("invalid target format specified")
+	default:
+		err = fmt.Errorf("invalid target format specified")
+		return
 	}
 	return fmt.Sprintf("---\n%s---", convertedFrontMatter), nil
 }
 
+// convertMarkdown converts a Markdown file from one format to another.
+// srcFile is the path of the source file to convert.
+// dstDir is the path of the destination directory where the converted file will be saved.
+// keyMap is a map of key mappings to apply during conversion.
+// targetFormat is the target format for the converted front matter ("toml" or "yaml").
+// errors is a channel where any errors that occur will be sent.
 func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFormat string, errors chan<- error) {
 	dstFile := filepath.Join(dstDir, filepath.Base(srcFile))
 
@@ -98,6 +111,12 @@ func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFor
 	fmt.Printf("Converted %s to %s\n", srcFile, dstFile)
 }
 
+// ConvertPosts converts a directory of Markdown files from one format to another.
+// srcDir is the path of the source directory containing the files to convert.
+// dstDir is the path of the destination directory where the converted files will be saved.
+// keyMap is a map of key mappings to apply during conversion.
+// targetFormat is the target format for the converted front matter ("toml" or "yaml").
+// The function returns any error that occurred.
 func ConvertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat string) error {
 	err := os.MkdirAll(dstDir, 0755)
 	if err != nil {
@@ -106,17 +125,26 @@ func ConvertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat 
 
 	var wg sync.WaitGroup
 	errors := make(chan error)
+	semaphore := make(chan struct{}, runtime.NumCPU())
 
-	filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
 			wg.Add(1)
+			semaphore <- struct{}{}
 			go func() {
 				defer wg.Done()
+				defer func() { <-semaphore }()
 				convertMarkdown(path, dstDir, keyMap, targetFormat, errors)
 			}()
 		}
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("error walking source directory %s: %v", srcDir, err)
+	}
 
 	go func() {
 		wg.Wait()
@@ -131,23 +159,31 @@ func ConvertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat 
 }
 
 func main() {
-	srcDir := flag.String("src", "", "Source directory")
-	dstDir := flag.String("dst", "", "Destination directory")
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] SRCDIR DSTDIR\n", os.Args[0])
+		fmt.Fprintln(flag.CommandLine.Output(), "Convert a directory of Markdown files from one format to another.")
+		fmt.Fprintln(flag.CommandLine.Output(), "\nOptions:")
+		flag.PrintDefaults()
+	}
+
 	format := flag.String("format", "toml", "Target format (toml or yaml)")
 	direction := flag.String("direction", "hexo2hugo", "Conversion direction (hexo2hugo or hugo2hexo)")
 	flag.Parse()
 
-	if *srcDir == "" || *dstDir == "" {
+	if flag.NArg() != 2 {
 		flag.Usage()
 		return
 	}
 
-	srcDirAbs, err := filepath.Abs(*srcDir)
+	srcDir := flag.Arg(0)
+	dstDir := flag.Arg(1)
+
+	srcDirAbs, err := filepath.Abs(srcDir)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	dstDirAbs, err := filepath.Abs(*dstDir)
+	dstDirAbs, err := filepath.Abs(dstDir)
 	if err != nil {
 		log.Fatal(err)
 	}
