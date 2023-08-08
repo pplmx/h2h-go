@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/pplmx/h2h/internal"
+	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -10,6 +13,7 @@ import (
 var srcDir string
 var dstDir string
 var targetFormat string
+var direction string
 
 var rootCmd = &cobra.Command{
 	Use:   "h2h",
@@ -21,9 +25,29 @@ and converts them to Hugo FrontMatter. The converted files are written to a spec
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("Converting Markdown files in %s to %s format and writing output to %s\n", srcDir, targetFormat, dstDir)
 
-		// TODO: Add your conversion logic here.
+		srcDirAbs, err := filepath.Abs(srcDir)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-		fmt.Println("Conversion completed.")
+		dstDirAbs, err := filepath.Abs(dstDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		var keyMap map[string]string
+		if direction == "hexo2hugo" {
+			keyMap = internal.HEXO_TO_HUGO_KEY_MAP
+		} else if direction == "hugo2hexo" {
+			keyMap = internal.HUGO_TO_HEXO_KEY_MAP
+		} else {
+			log.Fatalf("Invalid conversion direction: %s", direction)
+		}
+
+		err = internal.ConvertPosts(srcDirAbs, dstDirAbs, keyMap, targetFormat)
+		if err != nil {
+			log.Fatal(err)
+		}
 	},
 }
 
@@ -45,4 +69,6 @@ func init() {
 	cobra.CheckErr(err)
 
 	rootCmd.Flags().StringVar(&targetFormat, "format", "yaml", "target FrontMatter format (yaml or toml)")
+
+	rootCmd.Flags().StringVar(&direction, "direction", "hexo2hugo", "conversion direction (hexo2hugo or hugo2hexo)")
 }
