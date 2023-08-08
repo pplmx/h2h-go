@@ -1,43 +1,48 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
-// rootCmd represents the base command when called without any subcommands
+var srcDir string
+var dstDir string
+var targetFormat string
+
 var rootCmd = &cobra.Command{
 	Use:   "h2h",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+	Short: "A tool to convert Hexo FrontMatter to Hugo FrontMatter",
+	Long: `h2h is a tool to convert Hexo FrontMatter to Hugo FrontMatter. It can be used to migrate
+a Hexo blog to Hugo. The tool expects a directory containing Markdown files with Hexo FrontMatter
+and converts them to Hugo FrontMatter. The converted files are written to a specified destination directory.`,
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("Converting Markdown files in %s to %s format and writing output to %s\n", srcDir, targetFormat, dstDir)
+
+		// TODO: Add your conversion logic here.
+
+		fmt.Println("Conversion completed.")
+	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }
 
 func init() {
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.h2h.yaml)")
+	rootCmd.Flags().StringVar(&srcDir, "src", "", "source directory containing Markdown files to convert (required)")
+	err := rootCmd.MarkFlagRequired("src")
+	cobra.CheckErr(err)
 
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.Flags().StringVar(&dstDir, "dst", "", "destination directory to write converted Markdown files (required)")
+	err = rootCmd.MarkFlagRequired("dst")
+	cobra.CheckErr(err)
+
+	rootCmd.Flags().StringVar(&targetFormat, "format", "yaml", "target FrontMatter format (yaml or toml)")
 }
