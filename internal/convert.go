@@ -1,11 +1,12 @@
-package internal
+package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
-	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,7 @@ func convertFrontMatter(frontMatter string, keyMap map[string]string, targetForm
 func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFormat string, errors chan<- error) {
 	dstFile := filepath.Join(dstDir, filepath.Base(srcFile))
 
-	content, err := ioutil.ReadFile(srcFile)
+	content, err := os.ReadFile(srcFile)
 	if err != nil {
 		errors <- fmt.Errorf("error reading source file %s: %v", srcFile, err)
 		return
@@ -88,7 +89,7 @@ func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFor
 	}
 
 	convertedContent := fmt.Sprintf("%s\n\n%s", convertedFrontMatter, body)
-	err = ioutil.WriteFile(dstFile, []byte(convertedContent), 0644)
+	err = os.WriteFile(dstFile, []byte(convertedContent), 0644)
 	if err != nil {
 		errors <- fmt.Errorf("error writing to destination file %s: %v", dstFile, err)
 		return
@@ -97,7 +98,7 @@ func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFor
 	fmt.Printf("Converted %s to %s\n", srcFile, dstFile)
 }
 
-func convertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat string) error {
+func ConvertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat string) error {
 	err := os.MkdirAll(dstDir, 0755)
 	if err != nil {
 		return fmt.Errorf("error creating destination directory %s: %v", dstDir, err)
@@ -127,4 +128,41 @@ func convertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat 
 	}
 
 	return nil
+}
+
+func main() {
+	srcDir := flag.String("src", "", "Source directory")
+	dstDir := flag.String("dst", "", "Destination directory")
+	format := flag.String("format", "toml", "Target format (toml or yaml)")
+	direction := flag.String("direction", "hexo2hugo", "Conversion direction (hexo2hugo or hugo2hexo)")
+	flag.Parse()
+
+	if *srcDir == "" || *dstDir == "" {
+		flag.Usage()
+		return
+	}
+
+	srcDirAbs, err := filepath.Abs(*srcDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dstDirAbs, err := filepath.Abs(*dstDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var keyMap map[string]string
+	if *direction == "hexo2hugo" {
+		keyMap = HEXO_TO_HUGO_KEY_MAP
+	} else if *direction == "hugo2hexo" {
+		keyMap = HUGO_TO_HEXO_KEY_MAP
+	} else {
+		log.Fatalf("Invalid conversion direction: %s", *direction)
+	}
+
+	err = ConvertPosts(srcDirAbs, dstDirAbs, keyMap, *format)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
