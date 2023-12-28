@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/pplmx/h2h/internal"
+	"github.com/pplmx/h2h-go/internal"
 	"log"
 	"os"
 	"path/filepath"
