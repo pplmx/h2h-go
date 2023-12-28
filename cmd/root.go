@@ -27,7 +27,7 @@ The converted files are written to a specified destination directory.`,
 
 	// Define the function that will be executed when the root command is run
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("Converting Markdown files in %s to %s format and writing output to %s\n", srcDir, targetFormat, dstDir)
+		fmt.Printf("Converting Markdown files in [%s] to <%s> format and writing output to [%s]\n", srcDir, targetFormat, dstDir)
 
 		// Convert the source and destination directories to absolute paths
 		srcDirAbs, err := filepath.Abs(srcDir)

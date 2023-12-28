@@ -2,11 +2,9 @@ package internal
 
 import (
 	"bytes"
-	"flag"
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -91,7 +89,11 @@ func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFor
 		return
 	}
 
-	splits := strings.Split(string(content), "---")
+	splits := strings.SplitN(string(content), "---", 3)
+	if len(splits) < 3 {
+		errors <- fmt.Errorf("error parsing source file %s: not enough sections", srcFile)
+		return
+	}
 	frontMatter := splits[1]
 	body := splits[2]
 
@@ -108,7 +110,7 @@ func convertMarkdown(srcFile, dstDir string, keyMap map[string]string, targetFor
 		return
 	}
 
-	fmt.Printf("Converted %s to %s\n", srcFile, dstFile)
+	// fmt.Printf("Converted %s to %s\n", srcFile, dstFile)
 }
 
 // ConvertPosts converts a directory of Markdown files from one format to another.
@@ -156,49 +158,4 @@ func ConvertPosts(srcDir, dstDir string, keyMap map[string]string, targetFormat 
 	}
 
 	return nil
-}
-
-func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] SRCDIR DSTDIR\n", os.Args[0])
-		fmt.Fprintln(flag.CommandLine.Output(), "Convert a directory of Markdown files from one format to another.")
-		fmt.Fprintln(flag.CommandLine.Output(), "\nOptions:")
-		flag.PrintDefaults()
-	}
-
-	format := flag.String("format", "toml", "Target format (toml or yaml)")
-	direction := flag.String("direction", "hexo2hugo", "Conversion direction (hexo2hugo or hugo2hexo)")
-	flag.Parse()
-
-	if flag.NArg() != 2 {
-		flag.Usage()
-		return
-	}
-
-	srcDir := flag.Arg(0)
-	dstDir := flag.Arg(1)
-
-	srcDirAbs, err := filepath.Abs(srcDir)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	dstDirAbs, err := filepath.Abs(dstDir)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var keyMap map[string]string
-	if *direction == "hexo2hugo" {
-		keyMap = HEXO_TO_HUGO_KEY_MAP
-	} else if *direction == "hugo2hexo" {
-		keyMap = HUGO_TO_HEXO_KEY_MAP
-	} else {
-		log.Fatalf("Invalid conversion direction: %s", *direction)
-	}
-
-	err = ConvertPosts(srcDirAbs, dstDirAbs, keyMap, *format)
-	if err != nil {
-		log.Fatal(err)
-	}
 }
