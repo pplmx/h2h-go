@@ -1,6 +1,6 @@
 package main
 
-import "github.com/pplmx/h2h-go/cmd"
+import "github.com/pplmx/h2h/cmd"
 
 func main() {
 	cmd.Execute()

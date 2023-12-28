@@ -1,4 +1,4 @@
-module github.com/pplmx/h2h-go
+module github.com/pplmx/h2h
 
 go 1.21
 

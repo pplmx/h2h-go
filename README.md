@@ -11,7 +11,7 @@ To install `h2h`, you need to have Go installed on your system. Then, you can us
 install the tool:
 
 ```shell
-go get github.com/pplmx/h2h-go
+go get github.com/pplmx/h2h
 ```
 
 ## Usage
