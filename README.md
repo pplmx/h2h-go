@@ -1,26 +1,22 @@
-# h2h
+# h2h: Hexo to Hugo FrontMatter Converter
 
-`h2h` is a command-line interface (CLI) tool that converts Hexo FrontMatter to Hugo FrontMatter, or vice versa. It can
-be used to migrate a Hexo blog to Hugo or a Hugo blog to Hexo. The tool expects a directory containing Markdown files
-with either Hexo or Hugo FrontMatter and converts them to the other format. The converted files are written to a
-specified destination directory.
+`h2h` is a CLI tool that facilitates the migration of blogs from Hexo to Hugo and vice versa by converting FrontMatter between the two formats. It takes a directory of Markdown files with Hexo or Hugo FrontMatter, converts them to the other format, and writes the converted files to a specified destination directory.
 
 ## Installation
 
-To install `h2h`, you need to have Go installed on your system. Then, you can use the `go get` command to download and
-install the tool:
+Ensure Go is installed on your system. Use the `go install` command to download and install `h2h`:
 
 ```shell
-go get github.com/pplmx/h2h
+go install github.com/pplmx/h2h
 ```
 
 ## Usage
 
-To use `h2h`, you need to specify the source and destination directories using the `--src` and `--dst` flags,
-respectively. You can also specify the target FrontMatter format using the `--format` flag (either "yaml" or "toml") and
-the conversion direction using the `--direction` flag (either "hexo2hugo" or "hugo2hexo").
+Specify the source (`--src`) and destination (`--dst`) directories,
+the target FrontMatter format (`--format`: "yaml" or "toml"),
+and the conversion direction (`--direction`: “hexo2hugo” or “hugo2hexo”).
 
-Here is an example command that converts Hexo FrontMatter to Hugo FrontMatter in YAML format:
+Example command to convert Hexo FrontMatter to Hugo FrontMatter in YAML format:
 
 ```shell
 h2h --src /path/to/hexo/posts --dst /path/to/hugo/posts --format yaml --direction hexo2hugo
@@ -28,4 +24,8 @@ h2h --src /path/to/hexo/posts --dst /path/to/hugo/posts --format yaml --directio
 
 ## License
 
-This project is licensed under the MIT License.
+`h2h` is licensed under the MIT
+
+This version is more concise and maintains the essential information.
+The introduction is more succinct, and the usage instructions are clearer.
+Let me know if you need further assistance!😊
