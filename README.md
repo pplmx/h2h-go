@@ -25,7 +25,3 @@ h2h --src /path/to/hexo/posts --dst /path/to/hugo/posts --format yaml --directio
 ## License
 
 `h2h` is licensed under the MIT
-
-This version is more concise and maintains the essential information.
-The introduction is more succinct, and the usage instructions are clearer.
-Let me know if you need further assistance!😊
