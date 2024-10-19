@@ -74,7 +74,7 @@ func (fmc *FrontMatterConverter) Convert(frontMatter string) (string, error) {
 	switch fmc.targetFormat {
 	case "yaml":
 		encoder := yaml.NewEncoder(&buf)
-		encoder.SetIndent(2)
+		encoder.SetIndent(4)
 		err = encoder.Encode(convertedMap)
 	case "toml":
 		err = toml.NewEncoder(&buf).Encode(convertedMap)
