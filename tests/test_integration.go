@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,17 +11,8 @@ import (
 
 func TestConvertPosts(t *testing.T) {
 	// Create temporary directories for source and destination
-	srcDir, err := ioutil.TempDir("", "source")
-	if err != nil {
-		t.Fatalf("Failed to create temporary source directory: %v", err)
-	}
-	defer os.RemoveAll(srcDir)
-
-	dstDir, err := ioutil.TempDir("", "destination")
-	if err != nil {
-		t.Fatalf("Failed to create temporary destination directory: %v", err)
-	}
-	defer os.RemoveAll(dstDir)
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
 
 	// Create test markdown files
 	testFiles := []struct {
@@ -52,14 +42,14 @@ This is another test post.`,
 	}
 
 	for _, tf := range testFiles {
-		err := ioutil.WriteFile(filepath.Join(srcDir, tf.name), []byte(tf.content), 0644)
+		err := os.WriteFile(filepath.Join(srcDir, tf.name), []byte(tf.content), 0644)
 		if err != nil {
 			t.Fatalf("Failed to create test file %s: %v", tf.name, err)
 		}
 	}
 
 	// Run the conversion
-	err = internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
+	err := internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
 	if err != nil {
 		t.Fatalf("ConvertPosts failed: %v", err)
 	}
@@ -73,10 +63,8 @@ This is another test post.`,
 	}
 
 	// Check the content of converted files
-	// Here we're just checking if the files contain both "---" and the original content
-	// A more thorough check would parse and validate the YAML front matter
 	for _, tf := range testFiles {
-		content, err := ioutil.ReadFile(filepath.Join(dstDir, tf.name))
+		content, err := os.ReadFile(filepath.Join(dstDir, tf.name))
 		if err != nil {
 			t.Errorf("Failed to read converted file %s: %v", tf.name, err)
 			continue
@@ -94,17 +82,8 @@ This is another test post.`,
 
 func TestConvertPostsWithErrors(t *testing.T) {
 	// Create temporary directories for source and destination
-	srcDir, err := ioutil.TempDir("", "source")
-	if err != nil {
-		t.Fatalf("Failed to create temporary source directory: %v", err)
-	}
-	defer os.RemoveAll(srcDir)
-
-	dstDir, err := ioutil.TempDir("", "destination")
-	if err != nil {
-		t.Fatalf("Failed to create temporary destination directory: %v", err)
-	}
-	defer os.RemoveAll(dstDir)
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
 
 	// Create a valid test file
 	validFile := `---
@@ -113,7 +92,7 @@ date: 2023-05-01
 ---
 # Valid Post
 This is a valid post.`
-	err = ioutil.WriteFile(filepath.Join(srcDir, "valid.md"), []byte(validFile), 0644)
+	err := os.WriteFile(filepath.Join(srcDir, "valid.md"), []byte(validFile), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create valid test file: %v", err)
 	}
@@ -121,7 +100,7 @@ This is a valid post.`
 	// Create an invalid test file (missing front matter)
 	invalidFile := `# Invalid Post
 This is an invalid post without front matter.`
-	err = ioutil.WriteFile(filepath.Join(srcDir, "invalid.md"), []byte(invalidFile), 0644)
+	err = os.WriteFile(filepath.Join(srcDir, "invalid.md"), []byte(invalidFile), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create invalid test file: %v", err)
 	}
