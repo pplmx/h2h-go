@@ -18,7 +18,7 @@ import (
 type KeyMap map[string]string
 
 var (
-	hexoToHugoKeyMap = KeyMap{
+	HexoToHugoKeyMap = KeyMap{
 		"title":       "title",
 		"date":        "date",
 		"updated":     "lastmod",
@@ -28,7 +28,7 @@ var (
 		"keywords":    "keywords",
 		"permalink":   "slug",
 	}
-	hugoToHexoKeyMap = reverseMap(hexoToHugoKeyMap)
+	HugoToHexoKeyMap = reverseMap(HexoToHugoKeyMap)
 )
 
 func reverseMap(m KeyMap) KeyMap {
@@ -121,6 +121,17 @@ func (mc *MarkdownConverter) Convert(r io.Reader, w io.Writer) error {
 	return err
 }
 
+// ConversionError represents an error that occurred during the conversion process
+type ConversionError struct {
+	SourceFile string
+	Err        error
+}
+
+func (e *ConversionError) Error() string {
+	return fmt.Sprintf("error converting file %s: %v", e.SourceFile, e.Err)
+}
+
+// ConvertPosts converts all markdown posts in the source directory to the target format
 func ConvertPosts(srcDir, dstDir string, keyMap KeyMap, targetFormat string) error {
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
 		return fmt.Errorf("error creating destination directory %s: %w", dstDir, err)
@@ -129,7 +140,7 @@ func ConvertPosts(srcDir, dstDir string, keyMap KeyMap, targetFormat string) err
 	mc := NewMarkdownConverter(keyMap, targetFormat)
 
 	var wg sync.WaitGroup
-	errChan := make(chan error, runtime.NumCPU())
+	errChan := make(chan *ConversionError, runtime.NumCPU())
 	semaphore := make(chan struct{}, runtime.NumCPU())
 
 	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
@@ -143,22 +154,8 @@ func ConvertPosts(srcDir, dstDir string, keyMap KeyMap, targetFormat string) err
 				defer wg.Done()
 				defer func() { <-semaphore }()
 
-				srcFile, err := os.Open(path)
-				if err != nil {
-					errChan <- fmt.Errorf("error opening source file %s: %w", path, err)
-					return
-				}
-				defer srcFile.Close()
-
-				dstFile, err := os.Create(filepath.Join(dstDir, filepath.Base(path)))
-				if err != nil {
-					errChan <- fmt.Errorf("error creating destination file %s: %w", path, err)
-					return
-				}
-				defer dstFile.Close()
-
-				if err := mc.Convert(srcFile, dstFile); err != nil {
-					errChan <- fmt.Errorf("error converting file %s: %w", path, err)
+				if err := convertFile(mc, path, dstDir); err != nil {
+					errChan <- &ConversionError{SourceFile: path, Err: err}
 				}
 			}()
 		}
@@ -172,9 +169,31 @@ func ConvertPosts(srcDir, dstDir string, keyMap KeyMap, targetFormat string) err
 	wg.Wait()
 	close(errChan)
 
+	var conversionErrors []*ConversionError
 	for err := range errChan {
-		fmt.Println(err)
+		conversionErrors = append(conversionErrors, err)
+	}
+
+	if len(conversionErrors) > 0 {
+		return fmt.Errorf("encountered %d errors during conversion", len(conversionErrors))
 	}
 
 	return nil
+}
+
+func convertFile(mc *MarkdownConverter, srcPath, dstDir string) error {
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("error opening source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	dstPath := filepath.Join(dstDir, filepath.Base(srcPath))
+	dstFile, err := os.Create(dstPath)
+	if err != nil {
+		return fmt.Errorf("error creating destination file: %w", err)
+	}
+	defer dstFile.Close()
+
+	return mc.Convert(srcFile, dstFile)
 }
