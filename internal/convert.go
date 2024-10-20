@@ -2,17 +2,38 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
+
+// Config holds the configuration for the conversion process
+type Config struct {
+	SourceFormat        string
+	TargetFormat        string
+	FileExtension       string
+	MaxConcurrency      int
+	ConversionDirection string // New field to specify conversion direction
+}
+
+// DefaultConfig returns a default configuration
+func DefaultConfig() *Config {
+	return &Config{
+		SourceFormat:        "yaml",
+		TargetFormat:        "yaml",
+		FileExtension:       ".md",
+		MaxConcurrency:      4,
+		ConversionDirection: "hexo2hugo",
+	}
+}
 
 // KeyMap defines the mapping between different front matter formats
 type KeyMap map[string]string
@@ -42,20 +63,29 @@ func reverseMap(m KeyMap) KeyMap {
 // FrontMatterConverter handles the conversion of front matter
 type FrontMatterConverter struct {
 	keyMap       KeyMap
+	sourceFormat string
 	targetFormat string
 }
 
 // NewFrontMatterConverter creates a new FrontMatterConverter
-func NewFrontMatterConverter(keyMap KeyMap, targetFormat string) *FrontMatterConverter {
+func NewFrontMatterConverter(cfg *Config) *FrontMatterConverter {
+	var keyMap KeyMap
+	if cfg.ConversionDirection == "hexo2hugo" {
+		keyMap = HexoToHugoKeyMap
+	} else {
+		keyMap = HugoToHexoKeyMap
+	}
+
 	return &FrontMatterConverter{
 		keyMap:       keyMap,
-		targetFormat: targetFormat,
+		sourceFormat: cfg.SourceFormat,
+		targetFormat: cfg.TargetFormat,
 	}
 }
 
 func (fmc *FrontMatterConverter) Convert(frontMatter string) (string, error) {
 	var frontMatterMap map[string]interface{}
-	if err := yaml.Unmarshal([]byte(frontMatter), &frontMatterMap); err != nil {
+	if err := unmarshalFrontMatter(fmc.sourceFormat, []byte(frontMatter), &frontMatterMap); err != nil {
 		return "", fmt.Errorf("error unmarshaling front matter: %w", err)
 	}
 
@@ -69,24 +99,35 @@ func (fmc *FrontMatterConverter) Convert(frontMatter string) (string, error) {
 	}
 
 	var buf bytes.Buffer
-	var err error
-
-	switch fmc.targetFormat {
-	case "yaml":
-		encoder := yaml.NewEncoder(&buf)
-		encoder.SetIndent(4)
-		err = encoder.Encode(convertedMap)
-	case "toml":
-		err = toml.NewEncoder(&buf).Encode(convertedMap)
-	default:
-		return "", fmt.Errorf("invalid target format specified: %s", fmc.targetFormat)
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("error encoding front matter: %w", err)
+	if err := marshalFrontMatter(fmc.targetFormat, &buf, convertedMap); err != nil {
+		return "", fmt.Errorf("error marshaling front matter: %w", err)
 	}
 
 	return fmt.Sprintf("---\n%s---", buf.String()), nil
+}
+
+func unmarshalFrontMatter(format string, data []byte, v interface{}) error {
+	switch format {
+	case "yaml":
+		return yaml.Unmarshal(data, v)
+	case "toml":
+		return toml.Unmarshal(data, v)
+	default:
+		return fmt.Errorf("unsupported front matter format: %s", format)
+	}
+}
+
+func marshalFrontMatter(format string, w io.Writer, v interface{}) error {
+	switch format {
+	case "yaml":
+		encoder := yaml.NewEncoder(w)
+		encoder.SetIndent(4)
+		return encoder.Encode(v)
+	case "toml":
+		return toml.NewEncoder(w).Encode(v)
+	default:
+		return fmt.Errorf("unsupported front matter format: %s", format)
+	}
 }
 
 // MarkdownConverter handles the conversion of markdown files
@@ -95,9 +136,9 @@ type MarkdownConverter struct {
 }
 
 // NewMarkdownConverter creates a new MarkdownConverter
-func NewMarkdownConverter(keyMap KeyMap, targetFormat string) *MarkdownConverter {
+func NewMarkdownConverter(cfg *Config) *MarkdownConverter {
 	return &MarkdownConverter{
-		fmc: NewFrontMatterConverter(keyMap, targetFormat),
+		fmc: NewFrontMatterConverter(cfg),
 	}
 }
 
@@ -132,32 +173,32 @@ func (e *ConversionError) Error() string {
 }
 
 // ConvertPosts converts all markdown posts in the source directory to the target format
-func ConvertPosts(srcDir, dstDir string, keyMap KeyMap, targetFormat string) error {
+func ConvertPosts(srcDir, dstDir string, cfg *Config) error {
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
 		return fmt.Errorf("error creating destination directory %s: %w", dstDir, err)
 	}
 
-	mc := NewMarkdownConverter(keyMap, targetFormat)
+	mc := NewMarkdownConverter(cfg)
 
-	var wg sync.WaitGroup
-	errChan := make(chan *ConversionError, runtime.NumCPU())
-	semaphore := make(chan struct{}, runtime.NumCPU())
+	var mu sync.Mutex
+	var conversionErrors []*ConversionError
+
+	g, ctx := errgroup.WithContext(context.Background())
+	g.SetLimit(cfg.MaxConcurrency)
 
 	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
-			wg.Add(1)
-			semaphore <- struct{}{}
-			go func() {
-				defer wg.Done()
-				defer func() { <-semaphore }()
-
-				if err := convertFile(mc, path, dstDir); err != nil {
-					errChan <- &ConversionError{SourceFile: path, Err: err}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), cfg.FileExtension) {
+			g.Go(func() error {
+				if err := convertFile(ctx, mc, path, dstDir); err != nil {
+					mu.Lock()
+					conversionErrors = append(conversionErrors, &ConversionError{SourceFile: path, Err: err})
+					mu.Unlock()
 				}
-			}()
+				return nil
+			})
 		}
 		return nil
 	})
@@ -166,23 +207,27 @@ func ConvertPosts(srcDir, dstDir string, keyMap KeyMap, targetFormat string) err
 		return fmt.Errorf("error walking source directory %s: %w", srcDir, err)
 	}
 
-	wg.Wait()
-	close(errChan)
-
-	var conversionErrors []*ConversionError
-	for err := range errChan {
-		fmt.Printf("Error converting file %s: %v\n", err.SourceFile, err.Err)
-		conversionErrors = append(conversionErrors, err)
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	if len(conversionErrors) > 0 {
+		for _, err := range conversionErrors {
+			fmt.Printf("Error converting file %s: %v\n", err.SourceFile, err.Err)
+		}
 		return fmt.Errorf("encountered %d errors during conversion", len(conversionErrors))
 	}
 
 	return nil
 }
 
-func convertFile(mc *MarkdownConverter, srcPath, dstDir string) error {
+func convertFile(ctx context.Context, mc *MarkdownConverter, srcPath, dstDir string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("error opening source file: %w", err)

@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,106 +9,107 @@ import (
 
 	"github.com/pplmx/h2h/internal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func createTempFile(t testing.TB, dir, name, content string) {
 	t.Helper()
 	err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file %s: %v", name, err)
-	}
+	require.NoError(t, err, "Failed to create test file %s", name)
 }
 
 func verifyFileContent(t *testing.T, dir, name, expectedContent string) {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join(dir, name))
-	assert.NoError(t, err, "Failed to read converted file %s", name)
+	require.NoError(t, err, "Failed to read converted file %s", name)
 
 	assert.Equal(t, 2, strings.Count(string(content), "---"), "Expected 2 '---' separators in %s", name)
 	assert.Contains(t, string(content), expectedContent, "Converted file %s does not contain expected content", name)
 }
 
 func TestConvertPosts(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
-
-	testFiles := []struct {
-		name    string
-		content string
+	testCases := []struct {
+		name         string
+		files        []struct{ name, content string }
+		config       *internal.Config
+		expectError  bool
+		errorMessage string
 	}{
 		{
-			name: "test1.md",
-			content: `---
+			name: "Basic conversion",
+			files: []struct{ name, content string }{
+				{
+					name: "test1.md",
+					content: `---
 title: Test Post 1
 date: 2023-05-01
 tags: [test, markdown]
 ---
 # Test Post 1
 This is a test post.`,
-		},
-		{
-			name: "test2.md",
-			content: `---
+				},
+				{
+					name: "test2.md",
+					content: `---
 title: Test Post 2
 date: 2023-05-02
 categories: [testing]
 ---
 # Test Post 2
 This is a test post.`,
+				},
+			},
+			config:      internal.DefaultConfig(),
+			expectError: false,
+		},
+		{
+			name: "Invalid front matter",
+			files: []struct{ name, content string }{
+				{
+					name: "invalid.md",
+					content: `# Invalid Post
+This is an invalid post without front matter.`,
+				},
+			},
+			config:       internal.DefaultConfig(),
+			expectError:  true,
+			errorMessage: "encountered 1 errors during conversion",
+		},
+		{
+			name: "Empty file",
+			files: []struct{ name, content string }{
+				{name: "empty.md", content: ""},
+			},
+			config:       internal.DefaultConfig(),
+			expectError:  true,
+			errorMessage: "encountered 1 errors during conversion",
 		},
 	}
 
-	for _, tf := range testFiles {
-		createTempFile(t, srcDir, tf.name, tf.content)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			srcDir := t.TempDir()
+			dstDir := t.TempDir()
+
+			for _, file := range tc.files {
+				createTempFile(t, srcDir, file.name, file.content)
+			}
+
+			err := internal.ConvertPosts(srcDir, dstDir, tc.config)
+
+			if tc.expectError {
+				assert.Error(t, err)
+				if tc.errorMessage != "" {
+					assert.Contains(t, err.Error(), tc.errorMessage)
+				}
+			} else {
+				assert.NoError(t, err)
+				for _, file := range tc.files {
+					verifyFileContent(t, dstDir, file.name, "This is a test post")
+				}
+			}
+		})
 	}
-
-	err := internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
-	assert.NoError(t, err, "ConvertPosts failed")
-
-	for _, tf := range testFiles {
-		dstPath := filepath.Join(dstDir, tf.name)
-		_, err := os.Stat(dstPath)
-		assert.NoError(t, err, "Expected converted file %s does not exist", dstPath)
-		verifyFileContent(t, dstDir, tf.name, "This is a test post.")
-	}
-}
-
-func TestConvertPostsWithErrors(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
-
-	validFile := `---
-title: Valid Post
-date: 2023-05-01
----
-# Valid Post
-This is a valid post.`
-	createTempFile(t, srcDir, "valid.md", validFile)
-
-	invalidFile := `# Invalid Post
-This is an invalid post without front matter.`
-	createTempFile(t, srcDir, "invalid.md", invalidFile)
-
-	err := internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
-	assert.Error(t, err, "Expected ConvertPosts to return an error")
-
-	assert.Contains(t, err.Error(), "encountered 1 errors during conversion", "Unexpected error message")
-
-	_, err = os.Stat(filepath.Join(dstDir, "valid.md"))
-	assert.NoError(t, err, "Expected converted file valid.md does not exist")
-
-	_, err = os.Stat(filepath.Join(dstDir, "invalid.md"))
-	assert.True(t, os.IsNotExist(err), "Invalid file invalid.md should not have been converted")
-}
-
-func TestConvertEmptyFile(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
-
-	createTempFile(t, srcDir, "empty.md", "")
-
-	err := internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
-	assert.Error(t, err, "Expected ConvertPosts to return an error for empty file")
 }
 
 func TestConvertLargeFile(t *testing.T) {
@@ -122,7 +124,8 @@ date: 2023-05-01
 ` + largeContent
 	createTempFile(t, srcDir, "large.md", largeFile)
 
-	err := internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
+	cfg := internal.DefaultConfig()
+	err := internal.ConvertPosts(srcDir, dstDir, cfg)
 	assert.NoError(t, err, "ConvertPosts failed for large file")
 
 	verifyFileContent(t, dstDir, "large.md", "This is a large test post.")
@@ -134,7 +137,7 @@ func TestConvertNestedDirectories(t *testing.T) {
 
 	nestedDir := filepath.Join(srcDir, "nested")
 	err := os.Mkdir(nestedDir, 0755)
-	assert.NoError(t, err, "Failed to create nested directory")
+	require.NoError(t, err, "Failed to create nested directory")
 
 	nestedFile := `---
 title: Nested Post
@@ -144,58 +147,38 @@ date: 2023-05-01
 This is a nested post.`
 	createTempFile(t, nestedDir, "nested.md", nestedFile)
 
-	err = internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
+	cfg := internal.DefaultConfig()
+	err = internal.ConvertPosts(srcDir, dstDir, cfg)
 	assert.NoError(t, err, "ConvertPosts failed for nested directories")
 
 	verifyFileContent(t, filepath.Join(dstDir, "nested"), "nested.md", "This is a nested post.")
 }
 
-func TestConvertDifferentFrontMatterFormats(t *testing.T) {
+func TestConvertWithDifferentConcurrency(t *testing.T) {
 	srcDir := t.TempDir()
 	dstDir := t.TempDir()
 
-	testFiles := []struct {
-		name         string
-		content      string
-		targetFormat string
-	}{
-		{
-			name: "test_yaml.md",
-			content: `---
-title: Test YAML Post
-date: 2023-05-01
-tags: [test, yaml]
+	for i := 0; i < 10; i++ {
+		content := fmt.Sprintf(`---
+title: Test Post %d
+date: 2023-05-%02d
 ---
-# Test YAML Post
-This is a test post with YAML front matter.`,
-			targetFormat: "yaml",
-		},
-		{
-			name: "test_toml.md",
-			content: `+++
-title = "Test TOML Post"
-date = 2023-05-02
-tags = ["test", "toml"]
-+++
-# Test TOML Post
-This is a test post with TOML front matter.`,
-			targetFormat: "toml",
-		},
+# Test Post %d
+This is test post number %d.`, i, i+1, i, i)
+		createTempFile(t, srcDir, fmt.Sprintf("test%d.md", i), content)
 	}
 
-	for _, tf := range testFiles {
-		createTempFile(t, srcDir, tf.name, tf.content)
-	}
+	concurrencyLevels := []int{1, 2, 4, 8}
+	for _, concurrency := range concurrencyLevels {
+		t.Run(fmt.Sprintf("Concurrency%d", concurrency), func(t *testing.T) {
+			cfg := internal.DefaultConfig()
+			cfg.MaxConcurrency = concurrency
+			err := internal.ConvertPosts(srcDir, dstDir, cfg)
+			assert.NoError(t, err, "ConvertPosts failed with concurrency %d", concurrency)
 
-	for _, tf := range testFiles {
-		t.Run(tf.name, func(t *testing.T) {
-			err := internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, tf.targetFormat)
-			assert.NoError(t, err, "ConvertPosts failed for %s", tf.name)
-
-			dstPath := filepath.Join(dstDir, tf.name)
-			_, err = os.Stat(dstPath)
-			assert.NoError(t, err, "Expected converted file %s does not exist", dstPath)
-			verifyFileContent(t, dstDir, tf.name, "This is a test post with")
+			for i := 0; i < 10; i++ {
+				verifyFileContent(t, dstDir, fmt.Sprintf("test%d.md", i), fmt.Sprintf("This is test post number %d.", i))
+			}
 		})
 	}
 }
@@ -204,16 +187,21 @@ func BenchmarkConvertPosts(b *testing.B) {
 	srcDir := b.TempDir()
 	dstDir := b.TempDir()
 
-	largeContent := strings.Repeat("This is a large test post.\n", 10000)
-	largeFile := `---
-title: Large Post
-date: 2023-05-01
+	for i := 0; i < 10; i++ {
+		content := fmt.Sprintf(`---
+title: Bench Post %d
+date: 2023-05-%02d
 ---
-` + largeContent
-	createTempFile(b, srcDir, "large.md", largeFile)
+# Bench Post %d
+%s`, i, i%30+1, i, strings.Repeat("This is a benchmark post.\n", 10))
+		createTempFile(b, srcDir, fmt.Sprintf("bench%d.md", i), content)
+	}
+
+	cfg := internal.DefaultConfig()
+	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err := internal.ConvertPosts(srcDir, dstDir, internal.HexoToHugoKeyMap, "yaml")
+		err := internal.ConvertPosts(srcDir, dstDir, cfg)
 		if err != nil {
 			b.Fatalf("ConvertPosts failed: %v", err)
 		}

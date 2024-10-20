@@ -9,18 +9,12 @@ import (
 	"path/filepath"
 )
 
-const (
-	defaultFormat    = "yaml"
-	defaultDirection = "hexo2hugo"
-	logFileName      = "h2h.log"
-)
-
 var (
-	srcDir       string
-	dstDir       string
-	targetFormat string
-	direction    string
-	logFile      *os.File
+	srcDir      string
+	dstDir      string
+	config      *internal.Config
+	logFile     *os.File
+	logFileName = "h2h.log"
 )
 
 var rootCmd = &cobra.Command{
@@ -44,6 +38,7 @@ func Execute() {
 }
 
 func init() {
+	config = internal.DefaultConfig()
 	initLogger()
 	initFlags()
 }
@@ -60,29 +55,26 @@ func initLogger() {
 func initFlags() {
 	rootCmd.Flags().StringVar(&srcDir, "src", "", "source directory containing Markdown files to convert (required)")
 	rootCmd.Flags().StringVar(&dstDir, "dst", "", "destination directory to write converted Markdown files (required)")
-	rootCmd.Flags().StringVar(&targetFormat, "format", defaultFormat, "target FrontMatter format (yaml or toml)")
-	rootCmd.Flags().StringVar(&direction, "direction", defaultDirection, "conversion direction (hexo2hugo or hugo2hexo)")
+	rootCmd.Flags().StringVar(&config.SourceFormat, "source-format", config.SourceFormat, "source FrontMatter format (yaml or toml)")
+	rootCmd.Flags().StringVar(&config.TargetFormat, "target-format", config.TargetFormat, "target FrontMatter format (yaml or toml)")
+	rootCmd.Flags().StringVar(&config.FileExtension, "file-extension", config.FileExtension, "file extension for Markdown files")
+	rootCmd.Flags().IntVar(&config.MaxConcurrency, "max-concurrency", config.MaxConcurrency, "maximum number of concurrent file conversions")
+	rootCmd.Flags().StringVar(&config.ConversionDirection, "direction", config.ConversionDirection, "conversion direction (hexo2hugo or hugo2hexo)")
 
 	cobra.CheckErr(rootCmd.MarkFlagRequired("src"))
 	cobra.CheckErr(rootCmd.MarkFlagRequired("dst"))
 }
 
 func runConversion(cmd *cobra.Command, args []string) error {
-	log.Printf("Starting conversion from [%s] to [%s] format, output will be written to [%s]", srcDir, targetFormat, dstDir)
-	log.Printf("Conversion direction: %s", direction)
+	log.Printf("Starting conversion from [%s] to [%s] format, direction: %s, output will be written to [%s]",
+		config.SourceFormat, config.TargetFormat, config.ConversionDirection, dstDir)
 
 	srcDirAbs, dstDirAbs, err := getAbsolutePaths()
 	if err != nil {
 		return err
 	}
 
-	keyMap, err := getKeyMap(direction)
-	if err != nil {
-		log.Printf("Invalid direction: %v", err)
-		return err
-	}
-
-	if err := internal.ConvertPosts(srcDirAbs, dstDirAbs, keyMap, targetFormat); err != nil {
+	if err := internal.ConvertPosts(srcDirAbs, dstDirAbs, config); err != nil {
 		log.Printf("Conversion failed: %v", err)
 		return err
 	}
@@ -105,17 +97,6 @@ func getAbsolutePaths() (string, string, error) {
 	}
 
 	return srcDirAbs, dstDirAbs, nil
-}
-
-func getKeyMap(direction string) (internal.KeyMap, error) {
-	switch direction {
-	case "hexo2hugo":
-		return internal.HexoToHugoKeyMap, nil
-	case "hugo2hexo":
-		return internal.HugoToHexoKeyMap, nil
-	default:
-		return nil, fmt.Errorf("invalid conversion direction: %s", direction)
-	}
 }
 
 func cleanup() {
