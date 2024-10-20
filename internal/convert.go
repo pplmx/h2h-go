@@ -3,9 +3,9 @@ package internal
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,11 +22,11 @@ type Config struct {
 	TargetFormat        string
 	FileExtension       string
 	MaxConcurrency      int
-	ConversionDirection string // New field to specify conversion direction
+	ConversionDirection string
 }
 
-// DefaultConfig returns a default configuration
-func DefaultConfig() *Config {
+// NewDefaultConfig returns a default configuration
+func NewDefaultConfig() *Config {
 	return &Config{
 		SourceFormat:        "yaml",
 		TargetFormat:        "yaml",
@@ -36,45 +36,20 @@ func DefaultConfig() *Config {
 	}
 }
 
-// KeyMap defines the mapping between different front matter formats
-type KeyMap map[string]string
-
-var (
-	HexoToHugoKeyMap = KeyMap{
-		"title":       "title",
-		"date":        "date",
-		"updated":     "lastmod",
-		"categories":  "categories",
-		"tags":        "tags",
-		"description": "description",
-		"keywords":    "keywords",
-		"permalink":   "slug",
-	}
-	HugoToHexoKeyMap = reverseMap(HexoToHugoKeyMap)
-)
-
-func reverseMap(m KeyMap) KeyMap {
-	n := make(KeyMap, len(m))
-	for k, v := range m {
-		n[v] = k
-	}
-	return n
-}
-
 // FrontMatterConverter handles the conversion of front matter
 type FrontMatterConverter struct {
-	keyMap       KeyMap
+	keyMap       map[string]string
 	sourceFormat string
 	targetFormat string
 }
 
 // NewFrontMatterConverter creates a new FrontMatterConverter
 func NewFrontMatterConverter(cfg *Config) *FrontMatterConverter {
-	var keyMap KeyMap
+	var keyMap map[string]string
 	if cfg.ConversionDirection == "hexo2hugo" {
-		keyMap = HexoToHugoKeyMap
+		keyMap = getHexoToHugoKeyMap()
 	} else {
-		keyMap = HugoToHexoKeyMap
+		keyMap = getHugoToHexoKeyMap()
 	}
 
 	return &FrontMatterConverter{
@@ -84,15 +59,16 @@ func NewFrontMatterConverter(cfg *Config) *FrontMatterConverter {
 	}
 }
 
-func (fmc *FrontMatterConverter) Convert(frontMatter string) (string, error) {
+// ConvertFrontMatter converts the front matter from source format to target format
+func (fmc *FrontMatterConverter) ConvertFrontMatter(frontMatter string) (string, error) {
 	var frontMatterMap map[string]interface{}
 	if err := unmarshalFrontMatter(fmc.sourceFormat, []byte(frontMatter), &frontMatterMap); err != nil {
-		return "", fmt.Errorf("error unmarshaling front matter: %w", err)
+		return "", fmt.Errorf("unmarshaling front matter: %w", err)
 	}
 
 	convertedMap := make(map[string]interface{}, len(frontMatterMap))
 	for key, value := range frontMatterMap {
-		if convertedKey := fmc.keyMap[key]; convertedKey != "" {
+		if convertedKey, ok := fmc.keyMap[key]; ok {
 			convertedMap[convertedKey] = value
 		} else {
 			convertedMap[key] = value
@@ -101,10 +77,137 @@ func (fmc *FrontMatterConverter) Convert(frontMatter string) (string, error) {
 
 	var buf bytes.Buffer
 	if err := marshalFrontMatter(fmc.targetFormat, &buf, convertedMap); err != nil {
-		return "", fmt.Errorf("error marshaling front matter: %w", err)
+		return "", fmt.Errorf("marshaling front matter: %w", err)
 	}
 
 	return fmt.Sprintf("---\n%s---", buf.String()), nil
+}
+
+// MarkdownConverter handles the conversion of markdown files
+type MarkdownConverter struct {
+	fmc *FrontMatterConverter
+}
+
+// NewMarkdownConverter creates a new MarkdownConverter
+func NewMarkdownConverter(cfg *Config) *MarkdownConverter {
+	return &MarkdownConverter{fmc: NewFrontMatterConverter(cfg)}
+}
+
+// ConvertMarkdown converts a single markdown file
+func (mc *MarkdownConverter) ConvertMarkdown(r io.Reader, w io.Writer) error {
+	content, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("reading content: %w", err)
+	}
+
+	parts := strings.SplitN(string(content), "---", 3)
+	if len(parts) < 3 {
+		return errors.New("parsing content: invalid hexo/hugo markdown format")
+	}
+
+	convertedFrontMatter, err := mc.fmc.ConvertFrontMatter(parts[1])
+	if err != nil {
+		return fmt.Errorf("converting front matter: %w", err)
+	}
+
+	_, err = fmt.Fprintf(w, "%s\n\n%s", convertedFrontMatter, parts[2])
+	return err
+}
+
+// ConversionError represents an error that occurred during the conversion process
+type ConversionError struct {
+	SourceFile string
+	Err        error
+}
+
+func (e *ConversionError) Error() string {
+	return fmt.Sprintf("converting file %s: %v", e.SourceFile, e.Err)
+}
+
+// ConvertPosts converts all markdown posts in the source directory to the target format
+func ConvertPosts(srcDir, dstDir string, cfg *Config) error {
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		return fmt.Errorf("creating destination directory %s: %w", dstDir, err)
+	}
+
+	mc := NewMarkdownConverter(cfg)
+
+	var mu sync.Mutex
+	var conversionErrors []*ConversionError
+
+	g, ctx := errgroup.WithContext(context.Background())
+	g.SetLimit(cfg.MaxConcurrency)
+
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), cfg.FileExtension) {
+			return err
+		}
+
+		relPath, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return fmt.Errorf("getting relative path: %w", err)
+		}
+		dstPath := filepath.Join(dstDir, relPath)
+
+		g.Go(func() error {
+			if err := convertFile(ctx, mc, path, dstPath); err != nil {
+				mu.Lock()
+				conversionErrors = append(conversionErrors, &ConversionError{SourceFile: path, Err: err})
+				mu.Unlock()
+			}
+			return nil
+		})
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("walking source directory %s: %w", srcDir, err)
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	if len(conversionErrors) > 0 {
+		for _, err := range conversionErrors {
+			fmt.Printf("Error: %v\n", err)
+		}
+		return fmt.Errorf("encountered %d errors during conversion", len(conversionErrors))
+	}
+
+	return nil
+}
+
+func convertFile(ctx context.Context, mc *MarkdownConverter, srcPath, dstPath string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("opening source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return fmt.Errorf("creating destination directory: %w", err)
+	}
+
+	dstFile, err := os.Create(dstPath)
+	if err != nil {
+		return fmt.Errorf("creating destination file: %w", err)
+	}
+	defer dstFile.Close()
+
+	if err := mc.ConvertMarkdown(srcFile, dstFile); err != nil {
+		os.Remove(dstPath)
+		return fmt.Errorf("converting file: %w", err)
+	}
+
+	return nil
 }
 
 func unmarshalFrontMatter(format string, data []byte, v interface{}) error {
@@ -131,133 +234,24 @@ func marshalFrontMatter(format string, w io.Writer, v interface{}) error {
 	}
 }
 
-// MarkdownConverter handles the conversion of markdown files
-type MarkdownConverter struct {
-	fmc *FrontMatterConverter
-}
-
-// NewMarkdownConverter creates a new MarkdownConverter
-func NewMarkdownConverter(cfg *Config) *MarkdownConverter {
-	return &MarkdownConverter{
-		fmc: NewFrontMatterConverter(cfg),
+func getHexoToHugoKeyMap() map[string]string {
+	return map[string]string{
+		"title":       "title",
+		"categories":  "categories",
+		"date":        "date",
+		"description": "description",
+		"keywords":    "keywords",
+		"permalink":   "slug",
+		"tags":        "tags",
+		"updated":     "lastmod",
 	}
 }
 
-func (mc *MarkdownConverter) Convert(r io.Reader, w io.Writer) error {
-	content, err := io.ReadAll(r)
-	if err != nil {
-		return fmt.Errorf("error reading content: %w", err)
+func getHugoToHexoKeyMap() map[string]string {
+	hexoToHugo := getHexoToHugoKeyMap()
+	hugoToHexo := make(map[string]string, len(hexoToHugo))
+	for hexo, hugo := range hexoToHugo {
+		hugoToHexo[hugo] = hexo
 	}
-
-	splits := strings.SplitN(string(content), "---", 3)
-	if len(splits) < 3 {
-		return fmt.Errorf("error parsing content: not enough sections")
-	}
-
-	convertedFrontMatter, err := mc.fmc.Convert(splits[1])
-	if err != nil {
-		return fmt.Errorf("error converting front matter: %w", err)
-	}
-
-	_, err = fmt.Fprintf(w, "%s\n\n%s", convertedFrontMatter, splits[2])
-	return err
-}
-
-// ConversionError represents an error that occurred during the conversion process
-type ConversionError struct {
-	SourceFile string
-	Err        error
-}
-
-func (e *ConversionError) Error() string {
-	return fmt.Sprintf("error converting file %s: %v", e.SourceFile, e.Err)
-}
-
-// ConvertPosts converts all markdown posts in the source directory to the target format
-func ConvertPosts(srcDir, dstDir string, cfg *Config) error {
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
-		return fmt.Errorf("error creating destination directory %s: %w", dstDir, err)
-	}
-
-	mc := NewMarkdownConverter(cfg)
-
-	var mu sync.Mutex
-	var conversionErrors []*ConversionError
-
-	g, ctx := errgroup.WithContext(context.Background())
-	g.SetLimit(cfg.MaxConcurrency)
-
-	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), cfg.FileExtension) {
-			relPath, err := filepath.Rel(srcDir, path)
-			if err != nil {
-				return fmt.Errorf("error getting relative path: %w", err)
-			}
-			dstPath := filepath.Join(dstDir, relPath)
-			g.Go(func() error {
-				if err := convertFile(ctx, mc, path, dstPath); err != nil {
-					mu.Lock()
-					conversionErrors = append(conversionErrors, &ConversionError{SourceFile: path, Err: err})
-					mu.Unlock()
-				}
-				return nil
-			})
-		}
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("error walking source directory %s: %w", srcDir, err)
-	}
-
-	if err := g.Wait(); err != nil {
-		return err
-	}
-
-	if len(conversionErrors) > 0 {
-		for _, err := range conversionErrors {
-			log.Printf("Error converting file %s: %v\n", err.SourceFile, err.Err)
-		}
-		return fmt.Errorf("encountered %d errors during conversion", len(conversionErrors))
-	}
-
-	return nil
-}
-
-func convertFile(ctx context.Context, mc *MarkdownConverter, srcPath, dstPath string) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("error opening source file: %w", err)
-	}
-	defer srcFile.Close()
-
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-		return fmt.Errorf("error creating destination directory: %w", err)
-	}
-
-	dstFile, err := os.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("error creating destination file: %w", err)
-	}
-	defer func() {
-		dstFile.Close()
-		if err != nil {
-			os.Remove(dstPath)
-		}
-	}()
-
-	err = mc.Convert(srcFile, dstFile)
-	if err != nil {
-		return fmt.Errorf("error converting file: %w", err)
-	}
-	return nil
+	return hugoToHexo
 }

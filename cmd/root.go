@@ -38,7 +38,7 @@ func Execute() {
 }
 
 func init() {
-	config = internal.DefaultConfig()
+	config = internal.NewDefaultConfig()
 	initLogger()
 	initFlags()
 }

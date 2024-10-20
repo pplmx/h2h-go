@@ -59,7 +59,7 @@ categories: [testing]
 This is a test post.`,
 				},
 			},
-			config:      internal.DefaultConfig(),
+			config:      internal.NewDefaultConfig(),
 			expectError: false,
 		},
 		{
@@ -71,7 +71,7 @@ This is a test post.`,
 This is an invalid post without front matter.`,
 				},
 			},
-			config:       internal.DefaultConfig(),
+			config:       internal.NewDefaultConfig(),
 			expectError:  true,
 			errorMessage: "encountered 1 errors during conversion",
 		},
@@ -80,7 +80,7 @@ This is an invalid post without front matter.`,
 			files: []struct{ name, content string }{
 				{name: "empty.md", content: ""},
 			},
-			config:       internal.DefaultConfig(),
+			config:       internal.NewDefaultConfig(),
 			expectError:  true,
 			errorMessage: "encountered 1 errors during conversion",
 		},
@@ -124,7 +124,7 @@ date: 2023-05-01
 ` + largeContent
 	createTempFile(t, srcDir, "large.md", largeFile)
 
-	cfg := internal.DefaultConfig()
+	cfg := internal.NewDefaultConfig()
 	err := internal.ConvertPosts(srcDir, dstDir, cfg)
 	assert.NoError(t, err, "ConvertPosts failed for large file")
 
@@ -147,7 +147,7 @@ date: 2023-05-01
 This is a nested post.`
 	createTempFile(t, nestedDir, "nested.md", nestedFile)
 
-	cfg := internal.DefaultConfig()
+	cfg := internal.NewDefaultConfig()
 	err = internal.ConvertPosts(srcDir, dstDir, cfg)
 	assert.NoError(t, err, "ConvertPosts failed for nested directories")
 
@@ -171,7 +171,7 @@ This is test post number %d.`, i, i+1, i, i)
 	concurrencyLevels := []int{1, 2, 4, 8}
 	for _, concurrency := range concurrencyLevels {
 		t.Run(fmt.Sprintf("Concurrency%d", concurrency), func(t *testing.T) {
-			cfg := internal.DefaultConfig()
+			cfg := internal.NewDefaultConfig()
 			cfg.MaxConcurrency = concurrency
 			err := internal.ConvertPosts(srcDir, dstDir, cfg)
 			assert.NoError(t, err, "ConvertPosts failed with concurrency %d", concurrency)
@@ -197,7 +197,7 @@ date: 2023-05-%02d
 		createTempFile(b, srcDir, fmt.Sprintf("bench%d.md", i), content)
 	}
 
-	cfg := internal.DefaultConfig()
+	cfg := internal.NewDefaultConfig()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
