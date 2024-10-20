@@ -36,7 +36,7 @@ func TestConvertPosts(t *testing.T) {
 		errorMessage string
 	}{
 		{
-			name: "Basic conversion",
+			name: "Basic conversion(Hexo2Hugo)",
 			files: []struct{ name, content string }{
 				{
 					name: "test1.md",
