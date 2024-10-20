@@ -1,4 +1,4 @@
-.PHONY: help init image run build test
+.PHONY: help init image run build test bench
 .DEFAULT_GOAL := help
 
 APP_NAME := h2h
@@ -7,6 +7,10 @@ APP_PATH=.
 # init
 init:
 	@go mod tidy; go get -u ./...
+
+# fmt
+fmt:
+	@goimports -l -w $(APP_PATH)
 
 # build image
 image:
