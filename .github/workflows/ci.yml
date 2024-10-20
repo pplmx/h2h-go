@@ -1,0 +1,25 @@
+name: CI # Continuous Integration
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+    workflow_dispatch:
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+
+            -   name: Set up Go
+                uses: actions/setup-go@v5
+                with:
+                    go-version: 'stable'
+
+            -   name: Build
+                run: make init && make build
+
+            -   name: Test
+                run: make test

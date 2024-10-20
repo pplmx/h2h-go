@@ -1,0 +1,11 @@
+service:
+    h2h:
+        build: .
+        image: h2h
+
+networks:
+    h2h-net:
+        name: h2h-net
+        ipam:
+            config:
+                -   subnet: 172.16.238.0/24

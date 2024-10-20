@@ -1,5 +1,8 @@
 # h2h: Hexo to Hugo FrontMatter Converter
 
+[![CI](https://github.com/pplmx/h2h/workflows/CI/badge.svg)](https://github.com/pplmx/h2h/actions)
+[![Coverage Status](https://coveralls.io/repos/github/pplmx/h2h/badge.svg?branch=main)](https://coveralls.io/github/pplmx/h2h?branch=main)
+
 `h2h` is a CLI tool that facilitates the migration of blogs from Hexo to Hugo and vice versa by converting FrontMatter between the two formats. It processes a directory of Markdown files with either Hexo or Hugo FrontMatter, converts them to the other format, and writes the converted files to a specified destination directory. By default, it converts from Hexo to Hugo using YAML format.
 
 ## Features
@@ -64,4 +67,19 @@ go build
 
 ## License
 
-`h2h` is licensed under the MIT License.
+Licensed under either of
+
+- Apache License, Version 2.0
+  ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license
+  ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
