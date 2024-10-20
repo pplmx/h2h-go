@@ -12,21 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createTempFile(t testing.TB, dir, name, content string) {
-	t.Helper()
-	err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644)
-	require.NoError(t, err, "Failed to create test file %s", name)
-}
-
-func verifyFileContent(t *testing.T, dir, name, expectedContent string) {
-	t.Helper()
-	content, err := os.ReadFile(filepath.Join(dir, name))
-	require.NoError(t, err, "Failed to read converted file %s", name)
-
-	assert.Equal(t, 2, strings.Count(string(content), "---"), "Expected 2 '---' separators in %s", name)
-	assert.Contains(t, string(content), expectedContent, "Converted file %s does not contain expected content", name)
-}
-
 func TestConvertPosts(t *testing.T) {
 	testCases := []struct {
 		name         string
@@ -36,27 +21,15 @@ func TestConvertPosts(t *testing.T) {
 		errorMessage string
 	}{
 		{
-			name: "Basic conversion(Hexo2Hugo)",
+			name: "Basic conversion (Hexo2Hugo)",
 			files: []struct{ name, content string }{
 				{
-					name: "test1.md",
-					content: `---
-title: Test Post 1
-date: 2023-05-01
-tags: [test, markdown]
----
-# Test Post 1
-This is a test post.`,
+					name:    "test1.md",
+					content: createTestContent("Test Post 1", "2023-05-01", []string{"test", "markdown"}, nil, "This is a test post"),
 				},
 				{
-					name: "test2.md",
-					content: `---
-title: Test Post 2
-date: 2023-05-02
-categories: [testing]
----
-# Test Post 2
-This is a test post.`,
+					name:    "test2.md",
+					content: createTestContent("Test Post 2", "2023-05-02", nil, []string{"testing"}, "This is a test post"),
 				},
 			},
 			config:      internal.NewDefaultConfig(),
@@ -66,9 +39,8 @@ This is a test post.`,
 			name: "Invalid front matter",
 			files: []struct{ name, content string }{
 				{
-					name: "invalid.md",
-					content: `# Invalid Post
-This is an invalid post without front matter.`,
+					name:    "invalid.md",
+					content: "# Invalid Post\nThis is an invalid post without front matter.",
 				},
 			},
 			config:       internal.NewDefaultConfig(),
@@ -88,12 +60,7 @@ This is an invalid post without front matter.`,
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			srcDir := t.TempDir()
-			dstDir := t.TempDir()
-
-			for _, file := range tc.files {
-				createTempFile(t, srcDir, file.name, file.content)
-			}
+			srcDir, dstDir := createTestEnvironment(t, tc.files)
 
 			err := internal.ConvertPosts(srcDir, dstDir, tc.config)
 
@@ -113,16 +80,12 @@ This is an invalid post without front matter.`,
 }
 
 func TestConvertLargeFile(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
-
-	largeContent := strings.Repeat("This is a large test post.\n", 10000)
-	largeFile := `---
-title: Large Post
-date: 2023-05-01
----
-` + largeContent
-	createTempFile(t, srcDir, "large.md", largeFile)
+	srcDir, dstDir := createTestEnvironment(t, []struct{ name, content string }{
+		{
+			name:    "large.md",
+			content: createTestContent("Large Post", "2023-05-01", nil, nil, strings.Repeat("This is a large test post.\n", 10000)),
+		},
+	})
 
 	cfg := internal.NewDefaultConfig()
 	err := internal.ConvertPosts(srcDir, dstDir, cfg)
@@ -132,41 +95,30 @@ date: 2023-05-01
 }
 
 func TestConvertNestedDirectories(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
-
-	nestedDir := filepath.Join(srcDir, "nested")
-	err := os.Mkdir(nestedDir, 0755)
-	require.NoError(t, err, "Failed to create nested directory")
-
-	nestedFile := `---
-title: Nested Post
-date: 2023-05-01
----
-# Nested Post
-This is a nested post.`
-	createTempFile(t, nestedDir, "nested.md", nestedFile)
+	srcDir, dstDir := createTestEnvironment(t, []struct{ name, content string }{
+		{
+			name:    "nested/nested.md",
+			content: createTestContent("Nested Post", "2023-05-01", nil, nil, "# Nested Post\nThis is a nested post."),
+		},
+	})
 
 	cfg := internal.NewDefaultConfig()
-	err = internal.ConvertPosts(srcDir, dstDir, cfg)
+	err := internal.ConvertPosts(srcDir, dstDir, cfg)
 	assert.NoError(t, err, "ConvertPosts failed for nested directories")
 
 	verifyFileContent(t, filepath.Join(dstDir, "nested"), "nested.md", "This is a nested post.")
 }
 
 func TestConvertWithDifferentConcurrency(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
-
+	files := make([]struct{ name, content string }, 10)
 	for i := 0; i < 10; i++ {
-		content := fmt.Sprintf(`---
-title: Test Post %d
-date: 2023-05-%02d
----
-# Test Post %d
-This is test post number %d.`, i, i+1, i, i)
-		createTempFile(t, srcDir, fmt.Sprintf("test%d.md", i), content)
+		files[i] = struct{ name, content string }{
+			name:    fmt.Sprintf("test%d.md", i),
+			content: createTestContent(fmt.Sprintf("Test Post %d", i), fmt.Sprintf("2023-05-%02d", i+1), nil, nil, fmt.Sprintf("# Test Post %d\nThis is test post number %d.", i, i)),
+		}
 	}
+
+	srcDir, dstDir := createTestEnvironment(t, files)
 
 	concurrencyLevels := []int{1, 2, 4, 8}
 	for _, concurrency := range concurrencyLevels {
@@ -184,18 +136,15 @@ This is test post number %d.`, i, i+1, i, i)
 }
 
 func BenchmarkConvertPosts(b *testing.B) {
-	srcDir := b.TempDir()
-	dstDir := b.TempDir()
-
+	files := make([]struct{ name, content string }, 10)
 	for i := 0; i < 10; i++ {
-		content := fmt.Sprintf(`---
-title: Bench Post %d
-date: 2023-05-%02d
----
-# Bench Post %d
-%s`, i, i%30+1, i, strings.Repeat("This is a benchmark post.\n", 10))
-		createTempFile(b, srcDir, fmt.Sprintf("bench%d.md", i), content)
+		files[i] = struct{ name, content string }{
+			name:    fmt.Sprintf("bench%d.md", i),
+			content: createTestContent(fmt.Sprintf("Bench Post %d", i), fmt.Sprintf("2023-05-%02d", i%30+1), nil, nil, fmt.Sprintf("# Bench Post %d\n%s", i, strings.Repeat("This is a benchmark post.\n", 10))),
+		}
 	}
+
+	srcDir, dstDir := createTestEnvironment(b, files)
 
 	cfg := internal.NewDefaultConfig()
 	b.ResetTimer()
@@ -206,4 +155,49 @@ date: 2023-05-%02d
 			b.Fatalf("ConvertPosts failed: %v", err)
 		}
 	}
+}
+
+// Helper functions
+
+func createTestEnvironment(t testing.TB, files []struct{ name, content string }) (string, string) {
+	t.Helper()
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	for _, file := range files {
+		dir := filepath.Dir(filepath.Join(srcDir, file.name))
+		err := os.MkdirAll(dir, 0755)
+		require.NoError(t, err, "Failed to create directory: %s", dir)
+		err = os.WriteFile(filepath.Join(srcDir, file.name), []byte(file.content), 0644)
+		require.NoError(t, err, "Failed to create test file: %s", file.name)
+	}
+
+	return srcDir, dstDir
+}
+
+func createTestContent(title, date string, tags []string, categories []string, content string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(`---
+title: %s
+date: %s
+`, title, date))
+	if len(tags) > 0 {
+		sb.WriteString(fmt.Sprintf("tags: [%s]\n", strings.Join(tags, ", ")))
+	}
+	if len(categories) > 0 {
+		sb.WriteString(fmt.Sprintf("categories: [%s]\n", strings.Join(categories, ", ")))
+	}
+	sb.WriteString("---\n")
+
+	sb.WriteString(content)
+	return sb.String()
+}
+
+func verifyFileContent(t *testing.T, dir, name, expectedContent string) {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(dir, name))
+	require.NoError(t, err, "Failed to read converted file %s", name)
+
+	assert.Equal(t, 2, strings.Count(string(content), "---"), "Expected 2 '---' separators in %s", name)
+	assert.Contains(t, string(content), expectedContent, "Converted file %s does not contain expected content", name)
 }
