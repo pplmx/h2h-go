@@ -53,7 +53,7 @@ date: 2023-05-02
 categories: [testing]
 ---
 # Test Post 2
-This is another test post.`,
+This is a test post.`,
 		},
 	}
 
@@ -68,7 +68,7 @@ This is another test post.`,
 		dstPath := filepath.Join(dstDir, tf.name)
 		_, err := os.Stat(dstPath)
 		assert.NoError(t, err, "Expected converted file %s does not exist", dstPath)
-		verifyFileContent(t, dstDir, tf.name, "This is another test post.")
+		verifyFileContent(t, dstDir, tf.name, "This is a test post.")
 	}
 }
 

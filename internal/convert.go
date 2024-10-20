@@ -171,6 +171,7 @@ func ConvertPosts(srcDir, dstDir string, keyMap KeyMap, targetFormat string) err
 
 	var conversionErrors []*ConversionError
 	for err := range errChan {
+		fmt.Printf("Error converting file %s: %v\n", err.SourceFile, err.Err)
 		conversionErrors = append(conversionErrors, err)
 	}
 
@@ -193,7 +194,16 @@ func convertFile(mc *MarkdownConverter, srcPath, dstDir string) error {
 	if err != nil {
 		return fmt.Errorf("error creating destination file: %w", err)
 	}
-	defer dstFile.Close()
+	defer func() {
+		dstFile.Close()
+		if err != nil {
+			os.Remove(dstPath)
+		}
+	}()
 
-	return mc.Convert(srcFile, dstFile)
+	err = mc.Convert(srcFile, dstFile)
+	if err != nil {
+		return fmt.Errorf("error converting file: %w", err)
+	}
+	return nil
 }
