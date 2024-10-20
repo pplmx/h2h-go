@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,8 +192,13 @@ func ConvertPosts(srcDir, dstDir string, cfg *Config) error {
 			return err
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), cfg.FileExtension) {
+			relPath, err := filepath.Rel(srcDir, path)
+			if err != nil {
+				return fmt.Errorf("error getting relative path: %w", err)
+			}
+			dstPath := filepath.Join(dstDir, relPath)
 			g.Go(func() error {
-				if err := convertFile(ctx, mc, path, dstDir); err != nil {
+				if err := convertFile(ctx, mc, path, dstPath); err != nil {
 					mu.Lock()
 					conversionErrors = append(conversionErrors, &ConversionError{SourceFile: path, Err: err})
 					mu.Unlock()
@@ -213,7 +219,7 @@ func ConvertPosts(srcDir, dstDir string, cfg *Config) error {
 
 	if len(conversionErrors) > 0 {
 		for _, err := range conversionErrors {
-			fmt.Printf("Error converting file %s: %v\n", err.SourceFile, err.Err)
+			log.Printf("Error converting file %s: %v\n", err.SourceFile, err.Err)
 		}
 		return fmt.Errorf("encountered %d errors during conversion", len(conversionErrors))
 	}
@@ -221,7 +227,7 @@ func ConvertPosts(srcDir, dstDir string, cfg *Config) error {
 	return nil
 }
 
-func convertFile(ctx context.Context, mc *MarkdownConverter, srcPath, dstDir string) error {
+func convertFile(ctx context.Context, mc *MarkdownConverter, srcPath, dstPath string) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -234,7 +240,10 @@ func convertFile(ctx context.Context, mc *MarkdownConverter, srcPath, dstDir str
 	}
 	defer srcFile.Close()
 
-	dstPath := filepath.Join(dstDir, filepath.Base(srcPath))
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return fmt.Errorf("error creating destination directory: %w", err)
+	}
+
 	dstFile, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("error creating destination file: %w", err)
